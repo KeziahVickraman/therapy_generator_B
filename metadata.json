@@ -1,0 +1,8 @@
+{
+  "name": "Heidi Care — Therapy Homework Studio",
+  "description": "Between-session therapy homework generator, in-session clinician walkthrough tool, educational resources library, and secure client progress portal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
