@@ -27,6 +27,7 @@ import {
   formatScheduleLabel,
   getDefaultPracticeSchedule,
 } from '../utils/calendarInvite';
+import type { Variant } from '../pt';
 import type {
   AssignmentStatus,
   ClientProfile,
@@ -56,6 +57,7 @@ export interface WorksheetDraft {
 }
 
 interface ClinicianWorkspaceProps {
+  variant: Variant;
   clinicians: ClinicianProfile[];
   selectedClinicianId: string;
   onSelectClinician: (clinicianId: string) => void;
@@ -89,6 +91,8 @@ interface ClinicianWorkspaceProps {
   onOpenClientLink: (token: string) => void;
   onCopyLink: (token: string) => void;
   onShowToast?: (msg: string) => void;
+  onTrackCtaClick?: () => void;
+  onTrackGoalComplete?: () => void;
 }
 
 const MODALITIES: TherapyModality[] = [
@@ -150,6 +154,7 @@ function buildBlankDraft(modality: TherapyModality): WorksheetDraft {
 }
 
 export function ClinicianWorkspace({
+  variant,
   clinicians,
   selectedClinicianId,
   onSelectClinician,
@@ -167,6 +172,8 @@ export function ClinicianWorkspace({
   onOpenClientLink,
   onCopyLink,
   onShowToast,
+  onTrackCtaClick,
+  onTrackGoalComplete,
 }: ClinicianWorkspaceProps) {
   const selectedClinician =
     clinicians.find((c) => c.id === selectedClinicianId) || clinicians[0];
@@ -331,42 +338,220 @@ export function ClinicianWorkspace({
 
   const handleGenerateWithAI = async () => {
     if (!selectedClient) return;
+    if (!sessionNotes.trim()) {
+      setGenerateError(
+        'Please enter brief session notes or clinical themes before generating.'
+      );
+      return;
+    }
+
     setIsGenerating(true);
     setGenerateError(null);
-    try {
-      const res = await fetch('/api/ai/generate-homework', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientName: selectedClient.preferredName,
-          modality: draft.modality,
-          sessionNotes,
-          focusGoal: selectedClient.primaryFocus,
-          estimatedMinutes: draft.estimatedMinutes,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to generate homework draft.');
+
+    const modalityLibrary: Record<
+      TherapyModality,
+      {
+        title: string;
+        rationale: string;
+        tasks: DraftTaskInput[];
       }
-      setDraft((prev) => ({
-        ...prev,
-        title: data.title || prev.title,
-        clinicalRationale: data.clinicalRationale || prev.clinicalRationale,
-        walkthroughNotes: data.walkthroughNotes || prev.walkthroughNotes,
-        estimatedMinutes: Number(data.estimatedMinutes) || prev.estimatedMinutes,
-        tasks:
-          Array.isArray(data.tasks) && data.tasks.length > 0
-            ? data.tasks.slice(0, MAX_GENERATED_EXERCISES)
-            : prev.tasks.slice(0, MAX_GENERATED_EXERCISES),
-      }));
-    } catch (err: unknown) {
-      setGenerateError(
-        err instanceof Error ? err.message : 'Unable to reach AI generator.'
-      );
-    } finally {
-      setIsGenerating(false);
-    }
+    > = {
+      CBT: {
+        title: 'Thought Catch & Balanced Perspective Practice',
+        rationale: `Support ${selectedClient.preferredName} with cognitive flexibility around ${selectedClient.primaryFocus.toLowerCase()}.`,
+        tasks: [
+          {
+            title: 'Pause and capture one high-tension automatic thought',
+            instruction:
+              'Write down the trigger situation, the exact headline thought, and rate distress from 0 to 100.',
+            frequency: '3 moments this week',
+            promptQuestion:
+              'What automatic prediction showed up most strongly in that moment?',
+          },
+          {
+            title: 'Test objective evidence for and against the thought',
+            instruction:
+              'List one piece of evidence supporting the worry and two grounded facts from your past week that balance it.',
+            frequency: 'After each entry',
+            promptQuestion:
+              'What balanced statement feels realistic and kind right now?',
+          },
+          {
+            title: 'Five-minute end-of-day boundary reset',
+            instruction:
+              'Write tomorrow’s top two priorities on paper, close your screen, and take a short screen-free walk.',
+            frequency: 'Daily on workdays',
+            promptQuestion:
+              'Did this closing cue make it easier to step away from work stress?',
+          },
+        ],
+      },
+      ACT: {
+        title: 'Defusion & Values-Led Micro-Action',
+        rationale: `Help ${selectedClient.preferredName} build psychological flexibility and values-aligned steps around ${selectedClient.primaryFocus.toLowerCase()}.`,
+        tasks: [
+          {
+            title: 'Name repetitive self-talk as "Radio Doubt"',
+            instruction:
+              'When unhelpful thoughts repeat, prefix them with "I notice my mind is telling me the story that..."',
+            frequency: 'Daily check-in',
+            promptQuestion:
+              'How did naming the story change how tightly you held onto it?',
+          },
+          {
+            title: 'Choose one 15-minute values-aligned action',
+            instruction:
+              'Take one small step rooted in Care or Curiosity even if mild uncertainty tags along.',
+            frequency: '2x this week',
+            promptQuestion:
+              'What small action did you take, and what mattered most about it?',
+          },
+          {
+            title: 'Two-minute grounding pause before transitions',
+            instruction:
+              'Feel both feet on the floor, notice three steady breaths, and reconnect with how you want to show up next.',
+            frequency: 'Daily',
+            promptQuestion:
+              'Where did this brief pause help you respond rather than react?',
+          },
+        ],
+      },
+      DBT: {
+        title: 'Distress Tolerance & Paced Regulation Plan',
+        rationale: `Equip ${selectedClient.preferredName} with rapid physiological settling tools for moments related to ${selectedClient.primaryFocus.toLowerCase()}.`,
+        tasks: [
+          {
+            title: 'Cool-water temperature reset during high activation',
+            instruction:
+              'Hold a cool damp cloth across your cheeks and eyes for 20–30 seconds while slowing your exhale.',
+            frequency: 'When distress > 7/10',
+            promptQuestion:
+              'How quickly did the urge to react impulsively soften?',
+          },
+          {
+            title: 'Paced 4-6 breathing for three minutes',
+            instruction:
+              'Inhale smoothly for 4 counts and extend your exhale to 6 counts without forcing the breath.',
+            frequency: 'Daily practice',
+            promptQuestion:
+              'What shifted in your body tension after three minutes?',
+          },
+          {
+            title: 'Check the Facts before sending a tough reply',
+            instruction:
+              'Pause 10 minutes before responding when upset, and separate observed facts from assumptions.',
+            frequency: 'As needed',
+            promptQuestion:
+              'What difference did pausing make to how you communicated?',
+          },
+        ],
+      },
+      Somatic: {
+        title: 'Physiological Sigh & Interoceptive Grounding',
+        rationale: `Build nervous-system steadiness and sensory anchoring for ${selectedClient.preferredName} (${selectedClient.primaryFocus.toLowerCase()}).`,
+        tasks: [
+          {
+            title: 'Two physiological sighs before stressful transitions',
+            instruction:
+              'Take a full inhale through your nose, a short second sip of air at the top, and a long slow exhale through your mouth.',
+            frequency: 'Morning & pre-commute',
+            promptQuestion:
+              'How did shoulder or chest tightness change after the second exhale?',
+          },
+          {
+            title: '5-4-3-2-1 neutral sensory orienting scan',
+            instruction:
+              'Quietly notice 5 neutral visual shapes, 4 textures touching your skin, and 3 steady ambient sounds.',
+            frequency: 'When activation rises',
+            promptQuestion:
+              'Which physical anchor helped bring your attention outward fastest?',
+          },
+          {
+            title: '90-second wave observation without checking pulse',
+            instruction:
+              'Notice physical sensations rise and crest like a wave for 90 seconds while keeping your feet grounded.',
+            frequency: 'Twice this week',
+            promptQuestion:
+              'What happened to the intensity of the wave after 90 seconds?',
+          },
+        ],
+      },
+      'CBT-I': {
+        title: 'Evening Worry Buffer & Sleep Drive Protection',
+        rationale: `Unpair bed from rumination for ${selectedClient.preferredName} while supporting ${selectedClient.primaryFocus.toLowerCase()}.`,
+        tasks: [
+          {
+            title: '12-minute early evening worry & planning pad',
+            instruction:
+              'At least two hours before bed, jot open loops and one next step for tomorrow on paper, then close the notebook.',
+            frequency: 'Nightly before 8:30 PM',
+            promptQuestion:
+              'Which open loop felt lighter once written down outside the bedroom?',
+          },
+          {
+            title: '20-minute stimulus control reset if wide awake',
+            instruction:
+              'If awake and restless for more than ~20 minutes, step into dim light and read light paper pages until sleepy.',
+            frequency: 'As needed at night',
+            promptQuestion:
+              'Did stepping out help sleepiness return without clock-watching?',
+          },
+          {
+            title: 'Consistent morning wake anchor within 30 minutes',
+            instruction:
+              'Wake at your anchor time and get 5–10 minutes of natural morning daylight.',
+            frequency: 'Daily this week',
+            promptQuestion:
+              'How did your energy and evening sleep drive feel by day four?',
+          },
+        ],
+      },
+      Mindfulness: {
+        title: 'Present-Moment Anchoring & Gentle Noticing',
+        rationale: `Cultivate non-judgmental awareness for ${selectedClient.preferredName} around ${selectedClient.primaryFocus.toLowerCase()}.`,
+        tasks: [
+          {
+            title: 'Three-minute mindful breath & body check-in',
+            instruction:
+              'Notice where the breath moves most clearly without trying to change its rhythm.',
+            frequency: 'Daily',
+            promptQuestion:
+              'What did you notice in your mind or body during those three minutes?',
+          },
+          {
+            title: 'Single-task one everyday routine mindfully',
+            instruction:
+              'Drink your morning tea or walk for five minutes noticing temperature, pace, and surroundings without checking your phone.',
+            frequency: '4x this week',
+            promptQuestion:
+              'What details stood out when you slowed down to one task?',
+          },
+          {
+            title: 'RAIN self-compassion check-in during tough moments',
+            instruction:
+              'Recognize what is here, Allow it to be present, Investigate with kindness, and Nurture yourself gently.',
+            frequency: '2x this week',
+            promptQuestion:
+              'How did meeting the feeling with curiosity change its weight?',
+          },
+        ],
+      },
+    };
+
+    const template = modalityLibrary[draft.modality] || modalityLibrary.CBT;
+    const focusSnippet = sessionNotes.trim().split(/[.!?]/)[0]?.trim();
+
+    setDraft((prev) => ({
+      ...prev,
+      title: template.title,
+      clinicalRationale: focusSnippet
+        ? `${template.rationale} Theme noted: "${focusSnippet}".`
+        : template.rationale,
+      walkthroughNotes: `${selectedClient.preferredName}, let us keep these ${draft.estimatedMinutes}-minute practices gentle and doable before your ${selectedClient.nextSessionDate} session.`,
+      tasks: template.tasks.slice(0, MAX_GENERATED_EXERCISES),
+    }));
+    setIsGenerating(false);
+    onShowToast?.('Tailored 3-exercise worksheet draft generated');
   };
 
   const handleSaveWorksheet = async (targetStatus: 'walkthrough' | 'pushed') => {
@@ -1104,6 +1289,21 @@ export function ClinicianWorkspace({
                 <CalendarPlus className="w-4 h-4" aria-hidden="true" />
                 <span>Calendar &ldquo;Practice Block&rdquo; Invite</span>
               </button>
+
+              {variant === 'B' && (
+                <button
+                  type="button"
+                  disabled={isSaving || validDraftTasksCount === 0}
+                  onClick={() => {
+                    onTrackCtaClick?.();
+                    handleSaveWorksheet('pushed');
+                  }}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-[#8B2952] hover:bg-[#721F42] disabled:opacity-50 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                >
+                  <Send className="w-4 h-4" aria-hidden="true" />
+                  <span>Save &amp; One-Click Push</span>
+                </button>
+              )}
             </div>
           </div>
         </section>
@@ -1298,6 +1498,20 @@ export function ClinicianWorkspace({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-3">
+                      {variant === 'B' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onTrackCtaClick?.();
+                            handleSendPracticeBlockInvite(activeAssignment);
+                          }}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-[#8B2952] hover:bg-[#721F42] text-white rounded-lg transition-colors whitespace-nowrap shrink-0"
+                        >
+                          <Send className="w-4 h-4" aria-hidden="true" />
+                          <span>One-Click Push to Client</span>
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         onClick={() =>
@@ -1325,6 +1539,7 @@ export function ClinicianWorkspace({
                             client: selectedClient,
                             clinician: selectedClinician,
                           });
+                          onTrackGoalComplete?.();
                           onShowToast?.(
                             'Downloaded .ics Practice Block calendar invite'
                           );
@@ -1479,6 +1694,7 @@ export function ClinicianWorkspace({
                             client: sentDisplayClient,
                             clinician: selectedClinician,
                           });
+                          onTrackGoalComplete?.();
                           onShowToast?.(
                             'Downloaded .ics Practice Block calendar invite'
                           );
@@ -1498,6 +1714,7 @@ export function ClinicianWorkspace({
                         })}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onClick={() => onTrackGoalComplete?.()}
                         className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium text-[#151B2E] bg-white hover:bg-[#FAF9F6] border border-[#E6E2DA] rounded-lg transition-colors whitespace-nowrap"
                       >
                         <CalendarPlus
@@ -1519,6 +1736,7 @@ export function ClinicianWorkspace({
                           navigator.clipboard?.writeText(text).catch(() => {});
                           setCopiedInviteId(sentDisplayAssignment.id);
                           setTimeout(() => setCopiedInviteId(null), 2200);
+                          onTrackGoalComplete?.();
                           onShowToast?.('Copied Practice Block invite message');
                         }}
                         className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium text-[#2045C8] bg-white hover:bg-[#F3F1EC] border border-[#2045C8]/25 rounded-lg transition-colors whitespace-nowrap"

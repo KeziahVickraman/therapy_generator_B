@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
 import { TopBar } from './components/TopBar';
 import { RoleToggleStrip } from './components/RoleToggleStrip';
@@ -11,6 +11,7 @@ import {
 import { ClientPortal } from './components/ClientPortal';
 import { ResourcesLibrary } from './components/ResourcesLibrary';
 import { createInitialWorkspace } from './data/mockWorkspace';
+import { variant, track, consent, setConsent, loadClarity } from './pt';
 import type {
   ActiveTab,
   HomeworkAssignment,
@@ -74,8 +75,14 @@ export default function App() {
     ? workspace.clients.find((c) => c.id === initialMatchedAsg.clientId)
     : undefined;
 
+  const [activeVariant] = useState(() => variant());
+  const [consentChoice, setConsentChoice] = useState<'granted' | 'denied' | null>(
+    () => consent()
+  );
+  const hasTrackedScreenView = useRef(false);
+
   const [activeTab, setActiveTab] = useState<ActiveTab>(
-    initialMatchedAsg ? 'client' : 'overview'
+    initialMatchedAsg ? 'client' : 'clinician'
   );
   const [role, setRole] = useState<UserRole>(
     initialMatchedAsg ? 'client' : 'clinician'
@@ -108,7 +115,16 @@ export default function App() {
     }, 2600);
   }, []);
 
-  // Persist changes locally so Clinician <-> Client views stay synced across reloads and on Vercel static deployments
+  useEffect(() => {
+    if (hasTrackedScreenView.current) return;
+    hasTrackedScreenView.current = true;
+    if (consent() === 'granted') {
+      loadClarity();
+    }
+    track('screen_view');
+  }, []);
+
+  // Persist changes locally in the browser
   useEffect(() => {
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
@@ -180,6 +196,9 @@ export default function App() {
   const handleCopyLink = (token: string) => {
     const shareUrl = `${window.location.origin}/?clientLink=${token}`;
     navigator.clipboard?.writeText(shareUrl).catch(() => {});
+    if (role === 'clinician') {
+      track('goal_complete');
+    }
     showToast(`Copied private client link (?clientLink=${token})`);
   };
 
@@ -242,18 +261,14 @@ export default function App() {
       assignments: [created, ...prev.assignments],
     }));
     setActiveClientToken(created.uniqueToken);
+    if (payload.status === 'pushed') {
+      track('goal_complete');
+    }
     showToast(
       payload.status === 'pushed'
-        ? "Calendar 'Practice Block' invite prepared"
+        ? 'Therapy homework shared with client'
         : 'Worksheet saved for walkthrough'
     );
-
-    // Best-effort sync to backend if running full-stack Express server
-    fetch('/api/assignments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }).catch(() => {});
 
     return created;
   };
@@ -282,14 +297,9 @@ export default function App() {
     }));
 
     if (updates.status === 'pushed' && updatedResult) {
-      showToast("Practice Block invite ready to add or share");
+      track('goal_complete');
+      showToast('Therapy homework shared with client');
     }
-
-    fetch(`/api/assignments/${assignmentId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
-    }).catch(() => {});
 
     return (
       updatedResult ||
@@ -333,12 +343,6 @@ export default function App() {
         return updatedResult;
       }),
     }));
-
-    fetch(`/api/assignments/${assignmentId}/tasks/${taskId}/toggle`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ completed, reflectionResponse }),
-    }).catch(() => {});
 
     return (
       updatedResult ||
@@ -409,12 +413,6 @@ export default function App() {
     });
 
     showToast('Homework submitted to your clinician');
-
-    fetch(`/api/assignments/${assignmentId}/submit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }).catch(() => {});
   };
 
   const handleSaveClinicianReview = async (
@@ -433,12 +431,6 @@ export default function App() {
     }));
 
     showToast('Clinician note shared with client');
-
-    fetch(`/api/assignments/${assignmentId}/clinician-review`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clinicianFeedback }),
-    }).catch(() => {});
 
     return (
       updatedResult ||
@@ -542,6 +534,7 @@ export default function App() {
 
         {activeTab === 'clinician' && (
           <ClinicianWorkspace
+            variant={activeVariant}
             clinicians={workspace.clinicians}
             selectedClinicianId={selectedClinician.id}
             onSelectClinician={handleSelectClinician}
@@ -559,6 +552,8 @@ export default function App() {
             onOpenClientLink={handleOpenClientLink}
             onCopyLink={handleCopyLink}
             onShowToast={showToast}
+            onTrackCtaClick={() => track('cta_click')}
+            onTrackGoalComplete={() => track('goal_complete')}
           />
         )}
 
@@ -648,10 +643,51 @@ export default function App() {
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-5 right-5 z-50 bg-[#151B2E] text-white text-xs font-medium px-4 py-2.5 rounded-xl shadow-lg flex items-center gap-2"
+          className={`fixed right-5 z-40 bg-[#151B2E] text-white text-xs font-medium px-4 py-2.5 rounded-xl shadow-lg flex items-center gap-2 ${
+            consentChoice === null ? 'bottom-24' : 'bottom-5'
+          }`}
         >
           <Check className="w-3.5 h-3.5 text-[#86EFAC]" aria-hidden="true" />
           <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Bottom Consent Notice */}
+      {consentChoice === null && (
+        <div
+          role="region"
+          aria-label="Study consent notice"
+          className="fixed bottom-0 inset-x-0 z-50 bg-white border-t border-[#E6E2DA] shadow-lg"
+        >
+          <div className="max-w-[1360px] mx-auto px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+            <p className="text-xs sm:text-sm text-[#151B2E] max-w-3xl leading-relaxed">
+              This class prototype records which version you saw and what you
+              pressed, to test a design. Nothing about your visit leaves this
+              browser unless you agree.
+            </p>
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setConsent('granted');
+                  setConsentChoice('granted');
+                }}
+                className="px-4 py-2 text-xs font-medium text-[#151B2E] bg-[#F3F1EC] hover:bg-[#E6E2DA] border border-[#E6E2DA] rounded-lg transition-colors whitespace-nowrap"
+              >
+                Accept
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConsent('denied');
+                  setConsentChoice('denied');
+                }}
+                className="px-4 py-2 text-xs font-medium text-[#151B2E] bg-[#F3F1EC] hover:bg-[#E6E2DA] border border-[#E6E2DA] rounded-lg transition-colors whitespace-nowrap"
+              >
+                Decline
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

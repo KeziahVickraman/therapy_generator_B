@@ -12,7 +12,6 @@ export function TopBar({
   onStartNewWorksheet,
 }: TopBarProps) {
   const navItems: Array<{ id: ActiveTab; label: string }> = [
-    { id: 'overview', label: 'Overview' },
     { id: 'clinician', label: 'Clinician' },
     { id: 'client', label: 'Client Portal' },
     { id: 'resources', label: 'Resources' },
@@ -24,7 +23,7 @@ export function TopBar({
         {/* Zone 1: Single-line Brand Wordmark */}
         <button
           type="button"
-          onClick={() => onNavigate('overview')}
+          onClick={() => onNavigate('clinician')}
           className="flex items-center gap-2.5 text-left whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2045C8] rounded-md px-1 py-1"
         >
           <svg
